@@ -235,6 +235,9 @@ function Run-Phase([string]$Name, [string[]]$Args, [ValidateSet('read','write')]
         throw "$Name failed: no parsable DiskSpd metrics were collected in any run."
     }
 
+        if ($i -lt $Runs) { Start-Sleep -Seconds 2 }
+    }
+
     if ($Mode -eq 'read') {
         $avgMB = [math]::Round(($samples | Measure-Object ReadMBs -Average).Average, 2)
         $minMB = [math]::Round(($samples | Measure-Object ReadMBs -Minimum).Minimum, 2)
