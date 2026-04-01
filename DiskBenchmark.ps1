@@ -191,17 +191,50 @@ function Parse-DiskspdOutput([string[]]$Lines) {
 function Run-Phase([string]$Name, [string[]]$Args, [ValidateSet('read','write')][string]$Mode, [int]$Runs) {
     Write-Section $Name
     $samples = @()
+    $validSamples = 0
 
     for ($i = 1; $i -le $Runs; $i++) {
         Write-Info "Run $i/$Runs"
         $output = & $script:diskspdExe @Args 2>&1
         $parsed = Parse-DiskspdOutput -Lines $output
 
+        $hasSignal = if ($Mode -eq 'read') {
+            ($parsed.ReadMBs -gt 0 -or $parsed.ReadIOPS -gt 0 -or $parsed.ReadLatAvgMs -gt 0)
+        } else {
+            ($parsed.WriteMBs -gt 0 -or $parsed.WriteIOPS -gt 0 -or $parsed.WriteLatAvgMs -gt 0)
+        }
+
+        if (-not $hasSignal) {
+            Write-Warn "$Name run $i produced no parsable metrics, retrying once..."
+            $outputRetry = & $script:diskspdExe @Args 2>&1
+            $parsedRetry = Parse-DiskspdOutput -Lines $outputRetry
+            $hasSignalRetry = if ($Mode -eq 'read') {
+                ($parsedRetry.ReadMBs -gt 0 -or $parsedRetry.ReadIOPS -gt 0 -or $parsedRetry.ReadLatAvgMs -gt 0)
+            } else {
+                ($parsedRetry.WriteMBs -gt 0 -or $parsedRetry.WriteIOPS -gt 0 -or $parsedRetry.WriteLatAvgMs -gt 0)
+            }
+            if ($hasSignalRetry) {
+                $parsed = $parsedRetry
+                $hasSignal = $true
+            } else {
+                $snippet = (($outputRetry | Select-Object -First 3) -join ' | ')
+                $runIssues.Add("$Name run $i parse failed: no metrics parsed. Output head: $snippet")
+            }
+        }
+
         if ($parsed.Errors -gt 0) {
             $runIssues.Add("$Name run $i reported $($parsed.Errors) DiskSpd errors")
         }
 
         $samples += $parsed
+        if ($hasSignal) { $validSamples++ }
+        if ($i -lt $Runs) { Start-Sleep -Seconds 2 }
+    }
+
+    if ($validSamples -eq 0) {
+        throw "$Name failed: no parsable DiskSpd metrics were collected in any run."
+    }
+
         if ($i -lt $Runs) { Start-Sleep -Seconds 2 }
     }
 
@@ -321,6 +354,16 @@ try {
     $seqWrite = Run-Phase -Name '[2/4] Sequential Write' -Args @("-b$($prof.SeqBlock)","-d$($prof.Duration)","-o$($prof.QD)","-t$($prof.Threads)",'-Sh','-w100','-D','-L',"-c$($prof.FileSize)",$testFile) -Mode 'write' -Runs $prof.Runs
     $rand4kRead = Run-Phase -Name '[3/4] Random 4K Read' -Args @('-b4K',"-d$($prof.Duration)","-o$($prof.QD)","-t$($prof.Threads)",'-Sh','-w0','-r','-D','-L',"-c$($prof.FileSize)",$testFile) -Mode 'read' -Runs $prof.Runs
     $rand4kWrite = Run-Phase -Name '[4/4] Random 4K Write' -Args @('-b4K',"-d$($prof.Duration)","-o$($prof.QD)","-t$($prof.Threads)",'-Sh','-w100','-r','-D','-L',"-c$($prof.FileSize)",$testFile) -Mode 'write' -Runs $prof.Runs
+
+    $overallHasData = (
+        $seqRead.HasData -or
+        $seqWrite.HasData -or
+        $rand4kRead.HasData -or
+        $rand4kWrite.HasData
+    )
+    if (-not $overallHasData) {
+        throw 'Benchmark completed with zero parsed metrics across all phases. No JSON exported to avoid invalid empty results.'
+    }
 
     if (Test-Path $testFile) {
         Remove-Item $testFile -Force -ErrorAction SilentlyContinue
