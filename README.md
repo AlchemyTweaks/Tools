@@ -47,5 +47,6 @@ The output always includes:
 - `validity` (score, labels, warnings, issues)
 - `profile` (test settings and thresholds)
 - `results.seqRead`, `results.seqWrite`, `results.rand4kRead`, `results.rand4kWrite`
+- Compatibility aliases for viewer fields (e.g. `ReadMBs`, `WriteMBs`, `ReadP99`, `WriteP99`, `HasData`, `Variance`)
 
 This structure is designed to reduce missing-field errors during HTML viewer imports.

@@ -136,6 +136,14 @@ function Install-Diskspd {
 }
 
 function Parse-DiskspdOutput([string[]]$Lines) {
+    function To-Num([string]$Value) {
+        if ([string]::IsNullOrWhiteSpace($Value)) { return 0.0 }
+        $normalized = $Value.Trim() -replace ',', '.'
+        $out = 0.0
+        [void][double]::TryParse($normalized, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$out)
+        return $out
+    }
+
     $r = [ordered]@{
         ReadMBs = 0.0; WriteMBs = 0.0; ReadIOPS = 0.0; WriteIOPS = 0.0
         ReadLatAvgMs = 0.0; WriteLatAvgMs = 0.0
@@ -147,31 +155,31 @@ function Parse-DiskspdOutput([string[]]$Lines) {
     foreach ($raw in $Lines) {
         $line = $raw.Trim()
 
-        if ($line -match '^Read\s+\|\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)') {
-            $r.ReadMBs = [double]$Matches[2]
-            $r.ReadIOPS = [double]$Matches[3]
+        if ($line -match '^Read\s+\|\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)') {
+            $r.ReadMBs = To-Num $Matches[2]
+            $r.ReadIOPS = To-Num $Matches[3]
         }
-        if ($line -match '^Write\s+\|\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)') {
-            $r.WriteMBs = [double]$Matches[2]
-            $r.WriteIOPS = [double]$Matches[3]
-        }
-
-        if ($line -match '^avg\.\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)') {
-            $r.ReadLatAvgMs = [double]$Matches[1]
-            $r.WriteLatAvgMs = [double]$Matches[2]
+        if ($line -match '^Write\s+\|\s+([\d\.,]+)\s+([\d\.,]+)\s+([\d\.,]+)') {
+            $r.WriteMBs = To-Num $Matches[2]
+            $r.WriteIOPS = To-Num $Matches[3]
         }
 
-        if ($line -match '^\s*50th\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)') {
-            $r.ReadLatP50Ms = [double]$Matches[1]
-            $r.WriteLatP50Ms = [double]$Matches[2]
+        if ($line -match '^avg\.\s*\|\s*([\d\.,]+)\s*\|\s*([\d\.,]+)') {
+            $r.ReadLatAvgMs = To-Num $Matches[1]
+            $r.WriteLatAvgMs = To-Num $Matches[2]
         }
-        if ($line -match '^\s*95th\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)') {
-            $r.ReadLatP95Ms = [double]$Matches[1]
-            $r.WriteLatP95Ms = [double]$Matches[2]
+
+        if ($line -match '^\s*50th\s*\|\s*([\d\.,]+)\s*\|\s*([\d\.,]+)') {
+            $r.ReadLatP50Ms = To-Num $Matches[1]
+            $r.WriteLatP50Ms = To-Num $Matches[2]
         }
-        if ($line -match '^\s*99th\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)') {
-            $r.ReadLatP99Ms = [double]$Matches[1]
-            $r.WriteLatP99Ms = [double]$Matches[2]
+        if ($line -match '^\s*95th\s*\|\s*([\d\.,]+)\s*\|\s*([\d\.,]+)') {
+            $r.ReadLatP95Ms = To-Num $Matches[1]
+            $r.WriteLatP95Ms = To-Num $Matches[2]
+        }
+        if ($line -match '^\s*99th\s*\|\s*([\d\.,]+)\s*\|\s*([\d\.,]+)') {
+            $r.ReadLatP99Ms = To-Num $Matches[1]
+            $r.WriteLatP99Ms = To-Num $Matches[2]
         }
 
         if ($line -match '(\d+)\s+error') { $r.Errors += [int]$Matches[1] }
@@ -198,24 +206,66 @@ function Run-Phase([string]$Name, [string[]]$Args, [ValidateSet('read','write')]
     }
 
     if ($Mode -eq 'read') {
+        $avgMB = [math]::Round(($samples | Measure-Object ReadMBs -Average).Average, 2)
+        $minMB = [math]::Round(($samples | Measure-Object ReadMBs -Minimum).Minimum, 2)
+        $maxMB = [math]::Round(($samples | Measure-Object ReadMBs -Maximum).Maximum, 2)
+        $variance = if ($avgMB -gt 0) { [math]::Round((($maxMB - $minMB) / $avgMB) * 100, 2) } else { 0.0 }
+        $avgIOPS = [math]::Round(($samples | Measure-Object ReadIOPS -Average).Average, 0)
+        $latAvg = [math]::Round(($samples | Measure-Object ReadLatAvgMs -Average).Average, 3)
+        $p50 = [math]::Round(($samples | Measure-Object ReadLatP50Ms -Average).Average, 3)
+        $p95 = [math]::Round(($samples | Measure-Object ReadLatP95Ms -Average).Average, 3)
+        $p99 = [math]::Round(($samples | Measure-Object ReadLatP99Ms -Average).Average, 3)
+        $hasData = ($avgMB -gt 0 -or $avgIOPS -gt 0 -or $latAvg -gt 0 -or $p99 -gt 0)
+
         return [ordered]@{
-            MBs = [math]::Round(($samples | Measure-Object ReadMBs -Average).Average, 2)
-            IOPS = [math]::Round(($samples | Measure-Object ReadIOPS -Average).Average, 0)
-            LatAvgMs = [math]::Round(($samples | Measure-Object ReadLatAvgMs -Average).Average, 3)
-            LatP50Ms = [math]::Round(($samples | Measure-Object ReadLatP50Ms -Average).Average, 3)
-            LatP95Ms = [math]::Round(($samples | Measure-Object ReadLatP95Ms -Average).Average, 3)
-            LatP99Ms = [math]::Round(($samples | Measure-Object ReadLatP99Ms -Average).Average, 3)
+            MBs = $avgMB
+            IOPS = $avgIOPS
+            LatAvgMs = $latAvg
+            LatP50Ms = $p50
+            LatP95Ms = $p95
+            LatP99Ms = $p99
+            MBs_min = $minMB
+            MBs_max = $maxMB
+            Variance = $variance
+            HasData = $hasData
+            ReadMBs = $avgMB
+            ReadIOPS = $avgIOPS
+            ReadLatAvg = $latAvg
+            ReadP50 = $p50
+            ReadP95 = $p95
+            ReadP99 = $p99
             Runs = $Runs
         }
     }
 
+    $avgMB = [math]::Round(($samples | Measure-Object WriteMBs -Average).Average, 2)
+    $minMB = [math]::Round(($samples | Measure-Object WriteMBs -Minimum).Minimum, 2)
+    $maxMB = [math]::Round(($samples | Measure-Object WriteMBs -Maximum).Maximum, 2)
+    $variance = if ($avgMB -gt 0) { [math]::Round((($maxMB - $minMB) / $avgMB) * 100, 2) } else { 0.0 }
+    $avgIOPS = [math]::Round(($samples | Measure-Object WriteIOPS -Average).Average, 0)
+    $latAvg = [math]::Round(($samples | Measure-Object WriteLatAvgMs -Average).Average, 3)
+    $p50 = [math]::Round(($samples | Measure-Object WriteLatP50Ms -Average).Average, 3)
+    $p95 = [math]::Round(($samples | Measure-Object WriteLatP95Ms -Average).Average, 3)
+    $p99 = [math]::Round(($samples | Measure-Object WriteLatP99Ms -Average).Average, 3)
+    $hasData = ($avgMB -gt 0 -or $avgIOPS -gt 0 -or $latAvg -gt 0 -or $p99 -gt 0)
+
     return [ordered]@{
-        MBs = [math]::Round(($samples | Measure-Object WriteMBs -Average).Average, 2)
-        IOPS = [math]::Round(($samples | Measure-Object WriteIOPS -Average).Average, 0)
-        LatAvgMs = [math]::Round(($samples | Measure-Object WriteLatAvgMs -Average).Average, 3)
-        LatP50Ms = [math]::Round(($samples | Measure-Object WriteLatP50Ms -Average).Average, 3)
-        LatP95Ms = [math]::Round(($samples | Measure-Object WriteLatP95Ms -Average).Average, 3)
-        LatP99Ms = [math]::Round(($samples | Measure-Object WriteLatP99Ms -Average).Average, 3)
+        MBs = $avgMB
+        IOPS = $avgIOPS
+        LatAvgMs = $latAvg
+        LatP50Ms = $p50
+        LatP95Ms = $p95
+        LatP99Ms = $p99
+        MBs_min = $minMB
+        MBs_max = $maxMB
+        Variance = $variance
+        HasData = $hasData
+        WriteMBs = $avgMB
+        WriteIOPS = $avgIOPS
+        WriteLatAvg = $latAvg
+        WriteP50 = $p50
+        WriteP95 = $p95
+        WriteP99 = $p99
         Runs = $Runs
     }
 }
@@ -311,6 +361,7 @@ try {
             warmupDone = (-not $SkipWarmup)
             warnings = @($runWarnings)
             issues = @($runIssues)
+            benchmarkErrors = @($runIssues)
         }
         profile = [ordered]@{
             displayName = $prof.Name
