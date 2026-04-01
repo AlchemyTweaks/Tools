@@ -15,6 +15,8 @@ A Windows disk benchmark utility for **SSD / NVMe / HDD** with an interactive la
 - Sequential + random 4K tests with latency percentiles.
 - JSON output with stable schema (`meta`, `validity`, `profile`, `results`).
 - Clear warning/issue reporting when benchmark validity is low.
+- Post-run menu: open the HTML viewer, run another measurement, or exit.
+- If a previous result exists, the script suggests a Before/After comparison in the viewer.
 
 ## Quick Start
 

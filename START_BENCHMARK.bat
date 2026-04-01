@@ -112,6 +112,10 @@ set "EXITCODE=%ERRORLEVEL%"
 echo.
 if "%EXITCODE%"=="0" (
     echo [SUCCESS] Benchmark completed.
+) else if "%EXITCODE%"=="10" (
+    echo [INFO] Starting a new measurement...
+    timeout /t 1 >nul
+    goto MENU_DISKTYPE
 ) else (
     echo [ERROR] Benchmark failed with exit code %EXITCODE%.
     echo Check admin rights, drive availability, and network connectivity.

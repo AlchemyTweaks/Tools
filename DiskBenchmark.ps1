@@ -63,6 +63,7 @@ $prof = $profiles[$DiskType]
 $drivePath = "${DriveLetter}:\"
 $runIssues = New-Object System.Collections.Generic.List[string]
 $runWarnings = New-Object System.Collections.Generic.List[string]
+$stateFile = Join-Path $env:TEMP 'DiskBenchmark_LastResult.txt'
 
 function Get-DiskspdExe([string]$ManualPath) {
     if ($ManualPath -and (Test-Path $ManualPath)) { return (Resolve-Path $ManualPath).Path }
@@ -353,6 +354,41 @@ try {
     if ($runWarnings.Count -gt 0) { Write-Warn ("Warnings: " + ($runWarnings -join '; ')) }
     if ($runIssues.Count -gt 0) { Write-Fail ("Issues: " + ($runIssues -join '; ')) }
     Write-Ok "Results exported: $outputFile"
+
+    $previousResultPath = $null
+    if (Test-Path $stateFile) {
+        $previousResultPath = (Get-Content -Path $stateFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+    }
+    $canCompare = $previousResultPath -and (Test-Path $previousResultPath) -and ($previousResultPath -ne $outputFile)
+    Set-Content -Path $stateFile -Value $outputFile -Encoding UTF8
+
+    Write-Section 'Next Action'
+    if ($canCompare) {
+        Write-Info "Previous result detected: $previousResultPath"
+        Write-Info "Current result          : $outputFile"
+        Write-Info 'Tip: In the viewer, use "Before / After" and load previous as Before, current as After.'
+    }
+    Write-Host "  [1] Open DiskBenchmark-Viewer.html" -ForegroundColor White
+    Write-Host "  [2] Run another measurement" -ForegroundColor White
+    Write-Host "  [3] Exit" -ForegroundColor White
+    $next = Read-Host 'Select option (1/2/3)'
+
+    switch ($next) {
+        '1' {
+            $viewerPath = Join-Path $PSScriptRoot 'DiskBenchmark-Viewer.html'
+            if (Test-Path $viewerPath) {
+                Start-Process $viewerPath | Out-Null
+                Write-Ok 'Viewer opened in default browser.'
+                exit 0
+            } else {
+                Write-Warn "Viewer file not found: $viewerPath"
+                Write-Warn 'Place DiskBenchmark-Viewer.html in the same folder as the script.'
+                exit 0
+            }
+        }
+        '2' { exit 10 }
+        default { exit 0 }
+    }
 }
 catch {
     Write-Section 'Benchmark Failed'
