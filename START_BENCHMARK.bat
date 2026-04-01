@@ -1,59 +1,61 @@
 @echo off
 setlocal EnableDelayedExpansion
-title Disk Benchmark Tool v2.0
+title Disk Benchmark Tool v2.1
 
-:: Disk Benchmark Tool - Launcher
-:: Double-click this file to start. No manual PowerShell needed.
+:: -------------------------------------------------------------
+:: Disk Benchmark Tool Launcher (Windows 10/11/Home/Pro/LTSC/Server)
+:: -------------------------------------------------------------
 
 set "SCRIPT_DIR=%~dp0"
 set "PS1=%SCRIPT_DIR%DiskBenchmark.ps1"
 
 if not exist "%PS1%" (
     echo.
-    echo [ERROR] DiskBenchmark.ps1 not found in: %SCRIPT_DIR%
-    echo Make sure both files are in the same folder.
+    echo [ERROR] DiskBenchmark.ps1 was not found in:
+    echo         %SCRIPT_DIR%
     echo.
     pause
     exit /b 1
+)
+
+:: Ensure launcher runs elevated
+net session >nul 2>&1
+if errorlevel 1 (
+    echo Requesting Administrator privileges...
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath 'cmd.exe' -ArgumentList '/c ""%~f0""' -Verb RunAs"
+    exit /b
 )
 
 :MENU_DISKTYPE
 cls
 echo.
 echo +--------------------------------------------------+
-echo ^|         DISK BENCHMARK TOOL  v2.0               ^|
-echo ^|         Powered by Microsoft DiskSpd            ^|
+echo ^|             DISK BENCHMARK TOOL v2.1            ^|
+echo ^|             Powered by Microsoft DiskSpd         ^|
 echo +--------------------------------------------------+
 echo.
-echo Select the type of disk you want to benchmark:
+echo Select the disk type:
+echo   [1] NVMe (PCIe SSD)
+echo   [2] SSD  (SATA SSD)
+echo   [3] HDD  (Mechanical drive)
 echo.
-echo   [1] NVMe  (PCIe SSD - the fastest type)
-echo   [2] SSD   (SATA SSD - standard fast disk)
-echo   [3] HDD   (Mechanical hard drive - older/slower)
-echo.
-set /p DISKTYPE_CHOICE="  Your choice (1/2/3): "
+set /p DISKTYPE_CHOICE="Your choice (1/2/3): "
 
 if "%DISKTYPE_CHOICE%"=="1" set "DISKTYPE=NVMe" & goto MENU_DRIVE
 if "%DISKTYPE_CHOICE%"=="2" set "DISKTYPE=SSD"  & goto MENU_DRIVE
 if "%DISKTYPE_CHOICE%"=="3" set "DISKTYPE=HDD"  & goto MENU_DRIVE
 
-echo.
-echo Invalid choice. Please enter 1, 2, or 3.
+echo Invalid input. Please enter 1, 2, or 3.
 timeout /t 2 >nul
 goto MENU_DISKTYPE
 
 :MENU_DRIVE
 cls
 echo.
-echo +--------------------------------------------------+
-echo ^|  Disk Type: %DISKTYPE%                                ^|
-echo +--------------------------------------------------+
+echo Available fixed/removable drives (detailed):
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$vols=Get-CimInstance Win32_LogicalDisk | Where-Object {$_.DriveType -in 2,3}; '{0,-4} {1,-18} {2,-6} {3,8} {4,8} {5}' -f 'Drv','Label','FS','SizeGB','FreeGB','MediaType'; foreach($v in $vols){ $letter=$v.DeviceID.TrimEnd(':'); $label=[string]$v.VolumeName; if([string]::IsNullOrWhiteSpace($label)){$label='(no-label)'}; $size=[math]::Round($v.Size/1GB,1); $free=[math]::Round($v.FreeSpace/1GB,1); $media='Unknown'; try{ if(Get-Command Get-Partition -ErrorAction SilentlyContinue){ $p=Get-Partition -DriveLetter $letter -ErrorAction SilentlyContinue; if($p){ $d=Get-Disk -Number $p.DiskNumber -ErrorAction SilentlyContinue; if($d -and $d.MediaType){$media=$d.MediaType} } } }catch{}; '{0,-4} {1,-18} {2,-6} {3,8} {4,8} {5}' -f $v.DeviceID,$label,$v.FileSystem,$size,$free,$media }"
 echo.
-echo Which drive letter do you want to test?
-echo.
-echo Examples: C (system drive), D (secondary), E (external)
-echo.
-set /p DRIVELETTER="  Enter drive letter (just the letter, e.g. C): "
+set /p DRIVELETTER="Enter drive letter (example: C): "
 
 set "DRIVELETTER=%DRIVELETTER::=%"
 set "DRIVELETTER=%DRIVELETTER:\=%"
@@ -66,72 +68,59 @@ if "%DRIVELETTER%"=="" (
 )
 
 if not exist "%DRIVELETTER%:\" (
-    echo.
-    echo [ERROR] Drive %DRIVELETTER%:\ does not exist or is not accessible.
-    echo Check the drive letter and try again.
-    echo.
-    pause
+    echo [ERROR] Drive %DRIVELETTER%:\ does not exist.
+    timeout /t 2 >nul
     goto MENU_DRIVE
 )
 
 :MENU_LABEL
 cls
 echo.
-echo +--------------------------------------------------+
-echo ^|  Disk: %DISKTYPE%  on  %DRIVELETTER%:\                       ^|
-echo +--------------------------------------------------+
+echo Disk Type : %DISKTYPE%
+echo Drive     : %DRIVELETTER%:\
 echo.
-echo Enter a short label for this test run.
-echo Examples: Before_driver_update, After_format, Baseline
-echo.
-set /p LABEL="  Label (or press Enter for auto-date): "
+set /p LABEL="Test label (Enter for auto-generated label): "
 
 if "%LABEL%"=="" (
-    for /f "tokens=2 delims==" %%I in ('wmic os get localdatetime /value') do set "DT=%%I"
-    set "LABEL=Test_!DT:~0,8!_!DT:~8,4!"
+    for /f %%I in ('powershell.exe -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmm"') do set "LABEL=Test_%%I"
 )
 
 :MENU_CONFIRM
 cls
 echo.
-echo +--------------------------------------------------+
-echo ^|  READY TO START                                  ^|
-echo +--------------------------------------------------+
+echo Ready to start benchmark:
+echo   Disk Type : %DISKTYPE%
+echo   Drive     : %DRIVELETTER%:\
+echo   Label     : %LABEL%
 echo.
-echo   Disk Type  : %DISKTYPE%
-echo   Drive      : %DRIVELETTER%:\
-echo   Label      : %LABEL%
-echo.
-echo The test will download DiskSpd if needed, ask for UAC,
-echo run warmup + 4 benchmark phases, and save a JSON to Desktop.
-echo.
-set /p CONFIRM="  Start now? (Y/N): "
-if /i "%CONFIRM%"=="Y" goto RUN
+echo Actions:
+echo   - Auto-download DiskSpd if missing
+echo   - Run warmup and 4 test phases
+echo   - Save JSON output to Desktop
+set /p CONFIRM="Start now? (Y/N): "
 if /i "%CONFIRM%"=="N" goto MENU_DISKTYPE
-goto MENU_CONFIRM
+if /i not "%CONFIRM%"=="Y" goto MENU_CONFIRM
 
 :RUN
 cls
+echo Starting benchmark...
 echo.
-echo Starting benchmark... A UAC prompt may appear - click Yes.
+
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -DiskType "%DISKTYPE%" -DriveLetter "%DRIVELETTER%" -Label "%LABEL%"
+set "EXITCODE=%ERRORLEVEL%"
+
 echo.
-timeout /t 2 >nul
-
-powershell.exe -NoProfile -ExecutionPolicy Bypass ^
-    -File "%PS1%" ^
-    -DiskType "%DISKTYPE%" ^
-    -DriveLetter "%DRIVELETTER%" ^
-    -Label "%LABEL%"
-
-if errorlevel 1 (
-    echo.
-    echo The script exited with an error.
-    echo Common causes:
-    echo - UAC was cancelled
-    echo - No internet connection for DiskSpd download
-    echo - Not enough free space on the drive
-    echo.
-    pause
+if "%EXITCODE%"=="0" (
+    echo [SUCCESS] Benchmark completed.
+) else if "%EXITCODE%"=="10" (
+    echo [INFO] Starting a new measurement...
+    timeout /t 1 >nul
+    goto MENU_DISKTYPE
+) else (
+    echo [ERROR] Benchmark failed with exit code %EXITCODE%.
+    echo Check admin rights, drive availability, and network connectivity.
 )
 
-exit /b 0
+echo.
+pause
+exit /b %EXITCODE%
