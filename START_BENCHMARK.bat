@@ -52,8 +52,8 @@ goto MENU_DISKTYPE
 :MENU_DRIVE
 cls
 echo.
-echo Available fixed/removable drives:
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_LogicalDisk | Where-Object {$_.DriveType -in 2,3} | ForEach-Object { '{0,-4} {1,-20} {2}' -f $_.DeviceID, ($_.VolumeName -as [string]), $_.FileSystem }"
+echo Available fixed/removable drives (detailed):
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$vols=Get-CimInstance Win32_LogicalDisk | Where-Object {$_.DriveType -in 2,3}; '{0,-4} {1,-18} {2,-6} {3,8} {4,8} {5}' -f 'Drv','Label','FS','SizeGB','FreeGB','MediaType'; foreach($v in $vols){ $letter=$v.DeviceID.TrimEnd(':'); $label=[string]$v.VolumeName; if([string]::IsNullOrWhiteSpace($label)){$label='(no-label)'}; $size=[math]::Round($v.Size/1GB,1); $free=[math]::Round($v.FreeSpace/1GB,1); $media='Unknown'; try{ if(Get-Command Get-Partition -ErrorAction SilentlyContinue){ $p=Get-Partition -DriveLetter $letter -ErrorAction SilentlyContinue; if($p){ $d=Get-Disk -Number $p.DiskNumber -ErrorAction SilentlyContinue; if($d -and $d.MediaType){$media=$d.MediaType} } } }catch{}; '{0,-4} {1,-18} {2,-6} {3,8} {4,8} {5}' -f $v.DeviceID,$label,$v.FileSystem,$size,$free,$media }"
 echo.
 set /p DRIVELETTER="Enter drive letter (example: C): "
 

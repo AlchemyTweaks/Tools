@@ -17,6 +17,7 @@ A Windows disk benchmark utility for **SSD / NVMe / HDD** with an interactive la
 - Clear warning/issue reporting when benchmark validity is low.
 - Post-run menu: open the HTML viewer, run another measurement, or exit.
 - If a previous result exists, the script suggests a Before/After comparison in the viewer.
+- Drive selection menu shows detailed drive list (letter, label, filesystem, size/free space, media type) for easier identification.
 
 ## Quick Start
 
